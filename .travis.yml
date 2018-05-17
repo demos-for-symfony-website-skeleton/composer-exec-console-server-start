@@ -1,0 +1,83 @@
+---
+language: php
+addons:
+  apt:
+    packages:
+    - elinks # For dysplaying php files on console.
+
+cache:
+  directories:
+    - $HOME/.composer/cache/files
+
+php: # symfony/skeleton requires ^7.0.8
+- nightly
+- 7.2
+- 7.1
+- 7.0 # SYMFONY_VERSION="^3.4" only one version of skeleton working with php 7.0
+
+matrix:
+  fast_finish: true
+  include:
+  - php: 7.2
+    env: SKELETON_VERSION="dev-master@dev"
+  allow_failures:
+  - php: 7.3
+  - php: nightly
+  - env: SKELETON_VERSION="dev-master@dev"
+
+
+before_install:
+- go get -u github.com/jingweno/ccat
+# - if [[ -f config/parameters.yml.travis ]]; then cp config/parameters.yml.travis config/parameters.yml; fi
+# - pip install pygments # but now pygmentize is no more used right here.
+- wget --output-document=- https://github.com/travis-util/https-security-checker/archive/master.zip  | jar xvf /dev/stdin
+- . https-security-checker-master/curl_security_check.sh
+# Disabling Xdebug - Debugger and Profiler Tool for PHP
+- |
+  php -r "print_r(get_loaded_extensions(TRUE));"
+  if [ -f ~/.phpenv/versions/$(phpenv version-name)/etc/conf.d/xdebug.ini ]; then
+    cat ~/.phpenv/versions/$(phpenv version-name)/etc/conf.d/xdebug.ini
+    install --directory ~/.phpenv/versions/$(phpenv version-name)/etc/on-demand
+    mv ~/.phpenv/versions/$(phpenv version-name)/etc/conf.d/xdebug.ini ~/.phpenv/versions/$(phpenv version-name)/etc/on-demand
+    php -r "print_r(get_loaded_extensions(TRUE));"
+  fi
+
+
+install:
+# - composer create-project symfony/skeleton my-project $SYMFONY_VERSION
+#^ Does not work yet for Symfony dev versions!
+- |
+  composer create-project --no-install symfony/website-skeleton website-skeleton $SKELETON_VERSION
+  cd website-skeleton
+  composer config bin-dir bin
+  composer install
+# - composer --working-dir=.. install # Needs to be after to allow the previous script to show downloads of new versions.
+
+
+script:
+- composer exec --verbose -- console server:start # console server:start blocks endlessly with composer exec
+- printf 'HEAD / HTTP/1.1\r\n\r\n' | socat - TCP4:localhost:8000,forever >/dev/null # Waiting for server to connect.
+- elinks http://localhost:8000/ -dump-color-mode 4 -dump
+
+
+- curl_security_check composer.lock
+# - curl_security_check ../composer.lock
+#^ This checks that the application doesn't use dependencies with known security vulnerabilities
+
+
+after_script:
+- composer show
+- bin/console
+- ls --color
+- ls -R --color bin config public src
+# - ls -R --color var
+- $GOPATH/bin/ccat composer.json
+- php -s config/bundles.php | elinks -force-html -dump-color-mode 4 -dump
+- $GOPATH/bin/ccat config/routes.yaml
+- $GOPATH/bin/ccat config/services.yaml
+- $GOPATH/bin/ccat config/packages/framework.yaml
+- $GOPATH/bin/ccat config/packages/routing.yaml
+- $GOPATH/bin/ccat config/packages/dev/routing.yaml
+- $GOPATH/bin/ccat config/packages/test/framework.yaml
+- $GOPATH/bin/ccat src/Kernel.php
+- php -s src/Kernel.php | elinks -force-html -dump-color-mode 4 -dump
